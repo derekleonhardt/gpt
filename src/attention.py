@@ -16,7 +16,7 @@ class SelfAttention_v1(nn.Module):
         attention_weights = torch.softmax(attention_scores / keys.shape[-1]**0.5, dim=-1)
         context_vectors = attention_weights @ values
         
-        return context_vectorsa
+        return context_vectors
 
 class SelfAttention_v2(nn.Module):
     def __init__(self, d_in, d_out, qkv_bias=False):
@@ -48,7 +48,7 @@ class CausalAttention(nn.Module):
         self.register_buffer('mask', torch.triu(torch.ones(context_length, context_length), diagonal=1))
     
     def forward(self, x):
-        batc_dim, num_tokens, d_in = x.shape
+        batch_dim, num_tokens, d_in = x.shape
         keys = self.W_key(x)
         queries = self.W_query(x)
         values = self.W_value(x)
@@ -112,30 +112,3 @@ class MultiHeadAttention(nn.Module):
         context_vectors = context_vectors.contiguous().view(batch_dim, num_tokens, self.d_out)
         context_vectors = self.out_proj(context_vectors)
         return context_vectors
-
-#Example usage
-inputs = torch.tensor(
-    [[0.43, 0.15, 0.89], # Your (x^1) - first token's embedding
-    [0.55, 0.87, 0.66], # journey (x^2) - second token's embedding
-    [0.57, 0.85, 0.64], # starts (x^3) - third token's embedding
-    [0.22, 0.58, 0.33], # with (x^4) - fourth token's embedding
-    [0.77, 0.25, 0.10], # one (x^5) - fifth token's embedding
-    [0.05, 0.80, 0.55]] # step (x^6) - sixth token's embedding
-)
-
-batch = torch.stack((inputs, inputs), dim=0)
-print(batch.shape)
-
-torch.manual_seed(123)
-context_length = batch.shape[1]
-ca = CausalAttention(3, 2, 0.0, context_length)
-context_vecs = ca(batch)
-print("context_vecs.shape:", context_vecs.shape)
-
-torch.manual_seed(123)
-batch_size, context_length, d_in = batch.shape
-d_out = 2
-mha = MultiHeadAttention(d_in, d_out, context_length, 0.0, num_heads=2)
-context_vecs = mha(batch)
-print(context_vecs)
-print("context_vecs.shape:", context_vecs.shape)
