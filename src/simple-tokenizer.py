@@ -43,8 +43,4 @@ print(text)
 print(tokenizer.encode(text))
 print(tokenizer.decode(tokenizer.encode(text)))
 
-from importlib.metadata import version
-import tiktoken
-print("tiktoken version:", version("tiktoken"))
-
 
