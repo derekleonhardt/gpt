@@ -1,6 +1,8 @@
+from attention import MultiHeadAttention
 import torch
 import torch.nn as nn
 import tiktoken
+
 
 GPT_CONFIG_124M = {
     "vocab_size": 50257, # Vocabulary size
@@ -13,14 +15,19 @@ GPT_CONFIG_124M = {
 }
 
 
-class DummyGPTModel(nn.Module):
+class GPTModel(nn.Module):
+    # initializes token and positional embedding layers via config
+    # embedding layers -> converting input token indices into dense vectors + adding positional information
+    # then creates a sequential stack of transformer modules
+    # layer norm -> standardizing outputs from the transformer blocks to stabilize the learning process
+    # linear output head w/o bias -> projects transformer output into vocab space of the tokenizer to generate logits for each token in the vocab
     def __init__(self, cfg):
         super().__init__()
         self.token_emb = nn.Embedding(cfg["vocab_size"], cfg["emb_dim"])
         self.position_emb = nn.Embedding(cfg["context_length"], cfg["emb_dim"])
         self.drop_emb = nn.Dropout(cfg["drop_rate"])
-        self.transformer_blocks = nn.Sequential( *[DummyTransformerBlock(cfg) for _ in range(cfg["n_layers"])])
-        self.final_norm = DummyLayerNorm(cfg["emb_dim"])
+        self.transformer_blocks = nn.Sequential( *[TransformerBlock(cfg) for _ in range(cfg["n_layers"])])
+        self.final_norm = LayerNorm(cfg["emb_dim"])
         self.out_head = nn.Linear(cfg["emb_dim"], cfg["vocab_size"], bias=False)
 
     # describes the data flow through the model
@@ -37,21 +44,69 @@ class DummyGPTModel(nn.Module):
         logits = self.out_head(x)
         return logits
 
-class DummyTransformerBlock(nn.Module):
+class TransformerBlock(nn.Module):
     def __init__(self, cfg):
         super().__init__()
+        self.attention = MultiHeadAttention(
+            d_in = cfg["emb_dim"],
+            d_out = cfg["emb_dim"],
+            context_length = cfg["context_length"],
+            num_heads = cfg["n_heads"],
+            dropout = cfg["drop_rate"],
+            qkv_bias = cfg["qkv_bias"]
+        )
+        self.feed_forward = FeedForward(cfg)
+        self.norm1 = LayerNorm(cfg["emb_dim"])
+        self.norm2 = LayerNorm(cfg["emb_dim"])
+        self.drop_shortcut = nn.Dropout(cfg["drop_rate"])
 
     def forward(self, x):
+        shortcut = x
+        x = self.norm1(x)
+        x = self.attention(x)
+        x = self.drop_shortcut(x)
+        x = x + shortcut
+
+        shortcut = x
+        x = self.norm2(x)
+        x = self.feed_forward(x)
+        x = self.drop_shortcut(x)
+        x = x + shortcut
+
         return x
 
-class DummyLayerNorm(nn.Module):
-    def __init__(self, normalized_shape, eps=1e-5):
+
+class LayerNorm(nn.Module):
+    def __init__(self, emb_dim):
         super().__init__()
+        self.eps = 1e-5
+        self.scale = nn.Parameter(torch.ones(emb_dim))
+        self.shift = nn.Parameter(torch.zeros(emb_dim))
 
     def forward(self, x):
+        mean = x.mean(dim = 1, keepdim = True)
+        var = x.var(dim=1, keepdim = True, unbiased = False)
+        norm_x = (x - mean) / torch.sqrt(var + self.eps)
+        return self.scale * norm_x + self.shift
 
-        return x
+class GELU(nn.Module):
+    def __init__(self):
+        super().__init__()
+    
+    def forward(self, x):
+        return 0.5 * x * (1 + torch.tanh( torch.sqrt(torch.tensor(2.0 / torch.pi)) * (x + 0.044715 * torch.pow(x,3))))
 
+class FeedForward(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(cfg["emb_dim"], 4 * cfg["emb_dim"]),
+            GELU(),
+            nn.Linear(4 * cfg["emb_dim"], cfg["emb_dim"]),
+        )
+    
+    def forward(self, x):
+        return self.layers(x)
 
 tokenizer = tiktoken.get_encoding("gpt2")
 batch = []
@@ -62,12 +117,29 @@ txt2 = "Every day holds a"
 batch.append(torch.tensor(tokenizer.encode(txt1)))
 batch.append(torch.tensor(tokenizer.encode(txt2)))
 batch = torch.stack(batch, dim=0)
-print(batch)
-
 
 torch.manual_seed(123)
+model = GPTModel(GPT_CONFIG_124M)
 
-model = DummyGPTModel(GPT_CONFIG_124M)
-logits = model(batch)
-print("Output shape: ", logits.shape)
-print(logits)
+out = model(batch)
+print("Input batch:\n", batch)
+print("\nOutput shape:", out.shape)
+print(out)
+
+total_params = sum(p.numel() for p in model.parameters())
+print(f"Total number of parameters: {total_params:,}")
+
+print("Token embedding layer shape:", model.token_emb.weight.shape)
+print("Output layer shape:", model.out_head.weight.shape)
+
+total_params_gpt2 = (
+total_params - sum(p.numel()
+for p in model.out_head.parameters())
+)
+print(f"Number of trainable parameters "
+f"considering weight tying: {total_params_gpt2:,}"
+)
+
+total_size_bytes = total_params * 4
+total_size_mb = total_size_bytes / (1024 * 1024)
+print(f"Total size of the model: {total_size_mb:.2f} MB")
