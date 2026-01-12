@@ -14,6 +14,14 @@ def generate_text_simple(model, idx, max_new_tokens, context_size):
         idx = torch.cat((idx, idx_next), dim=1)
     return idx
 
+def text_to_token(text, tokenizer):
+    encoded_text = tokenizer.encode(text, allowed_special={'<|endoftext|>'})
+    return torch.tensor(encoded).unsqueeze(0)
+
+def token_ids_to_text(token_ids, tokenizer):
+    flat = token_ids.squeeze(0)
+    return tokenizer.decode(flat.tolist())
+
 tokenizer = tiktoken.get_encoding("gpt2")
 
     start_context = "Hello, I am"
